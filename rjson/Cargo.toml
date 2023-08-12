@@ -1,0 +1,16 @@
+[package]
+name = "rjson"
+version = "0.0.1"
+description = "Sample json parser for coding challenges"
+edition = "2021"
+
+[lib]
+name = "rjson"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rjson"
+path = "src/bin.rs"
+
+[dependencies]
+regex = "1.9.3"
