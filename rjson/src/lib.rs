@@ -5,43 +5,51 @@ Copied in (most) part from Matthias Kaak implementation (https://github.com/zvav
 
 use regex::Regex;
 use std::str::FromStr;
+use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum JsonObject {
     Array(Vec<Self>),
-    Obj(Vec<(String, Self)>),
+    Object(Vec<(String, Self)>),
     Number(f64),
     JsonString(String),
     Bool(bool),
     Null,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Error)]
 pub enum JsonError {
-    /// The input was empty (or only whitespace)
+    #[error("input was empty or only whitespace")]
     Empty,
-    /// At the given position the given character was read invalidly
+    #[error("At the given position the given character was read invalidly")]
     InvalidChar(char, usize),
-    /// A string with no closing quote
+    #[error("unterminated string")]
     UnterminatedString,
-    /// The input ended on a backslash
+    #[error("input ended in a backslash without the corresponding escape characters")]
     EndedOnEscape,
-    /// An unknown escape sequence was encountered
+    #[error("unknown escape sequence")]
     UnknownEscapeSequence(char),
-    /// A not string was used as key in an [`JsonObject::Obj`]
+    #[error("A not string was used as key in an [`JsonObject::Obj`]")]
     NonStringAsKey,
-    /// Per '\uXXXX' was an invalid code point specified
+    #[error("invalid code point specified")]
     InvalidCodepoint,
-    /// A number that is invalid in json, but is a perfectly fine
-    /// floating-point number.
+    #[error("invalid number")]
     InvalidNumber,
+    #[error("json ended without closing the corresponding array bracket")]
     UnterminatedArray,
+    #[error("json ended without closing the corresponding object bracket")]
+    UnterminatedObject,
 }
 
 impl JsonObject {
     pub fn read(s: &str) -> Result<Self, JsonError> {
         let mut parser = Parser::new(s);
-        parser.partial_read()
+        parser.partial_read(true)
+    }
+
+    pub fn read_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let contents = std::fs::read_to_string(path)?;
+        Ok(Self::read(&contents)?)
     }
 }
 
@@ -99,10 +107,14 @@ impl Parser {
 
     /// Reads a json object partially, given its string representation and an index from
     /// where to start reading
-    fn partial_read(&mut self) -> Result<JsonObject, JsonError> {
+    fn partial_read(&mut self, root: bool) -> Result<JsonObject, JsonError> {
         self.skip_whitespace();
         if let Some(c) = self.peek() {
-            match c {
+            if root && c != '{' && c != '[' {
+                return Err(JsonError::InvalidChar(self.buf[self.index], self.index));
+            }
+            let result = match c {
+                '{' => self.partial_read_object(),
                 '[' => self.partial_read_array(),
                 '0'..='9' | '+' | '-' => self.partial_read_number(),
                 '"' => self.partial_read_string(),
@@ -110,7 +122,16 @@ impl Parser {
                 't' => self.partial_read_true(),
                 'n' => self.partial_read_null(),
                 _ => Err(JsonError::InvalidChar(self.buf[self.index], self.index)),
+            };
+            if result.is_err() {
+                return result;
             }
+            if root {
+                if let Some(c) = self.peek() {
+                    return Err(JsonError::InvalidChar(c, self.index));
+                }
+            }
+            return result;
         } else {
             return Err(JsonError::Empty);
         }
@@ -130,9 +151,20 @@ impl Parser {
         }
 
         // Read integer
+        let mut first_digit = -1;
+        let mut digits_size = 0;
         while let Some(c @ '0'..='9') = self.peek() {
             token.push(c);
+            if first_digit == -1 {
+                first_digit = c.to_digit(10).ok_or(JsonError::InvalidNumber)? as i32;
+            }
+            digits_size += 1;
             self.next_no_skip();
+        }
+
+        // Check for possible leading zeros
+        if first_digit == 0 && digits_size > 1 {
+            return Err(JsonError::InvalidNumber);
         }
 
         // Read fraction
@@ -146,8 +178,16 @@ impl Parser {
         // Read exponent
         if let Some(c @ ('e' | 'E')) = self.peek() {
             token.push(c);
-            while let Some(f @ '0'..='9') = self.next_no_skip() {
+            self.next_no_skip();
+            // Read exponent sign
+            if let Some(c @ ('+' | '-')) = self.peek() {
+                token.push(c);
+                self.next_no_skip();
+            }
+            // Read exponent digits
+            while let Some(f @ '0'..='9') = self.peek() {
                 token.push(f);
+                self.next_no_skip();
             }
         }
 
@@ -246,14 +286,13 @@ impl Parser {
                     self.next_no_skip();
                     return Ok(JsonObject::JsonString(String::from_utf16(&utf16).unwrap()));
                 }
+                '\n' | '\r' | '\t' => return Err(JsonError::InvalidChar(c, self.index)),
                 _ => {
                     let mut buf = [0u16; 2];
                     utf16.extend_from_slice(c.encode_utf16(&mut buf));
                 }
             }
         }
-
-        println!("Shouldn't go there");
 
         Err(JsonError::UnterminatedString)
     }
@@ -262,23 +301,79 @@ impl Parser {
         let mut elements: Vec<JsonObject> = Vec::new();
         self.next_no_skip();
         self.skip_whitespace();
+        let mut first_elem = true;
         loop {
             self.skip_whitespace();
             match self.peek() {
                 Some(',') => {
+                    if first_elem {
+                        return Err(JsonError::InvalidChar(',', self.index));
+                    }
                     if let Some(c @ (',' | ']')) = self.next() {
                         return Err(JsonError::InvalidChar(c, self.index));
                     }
                 }
-                Some(']') => return Ok(JsonObject::Array(elements)),
+                Some(']') => {
+                    self.next();
+                    return Ok(JsonObject::Array(elements));
+                }
                 Some(c) => {
-                    let elem = self.partial_read();
+                    let elem = self.partial_read(false);
                     match elem {
-                        Ok(e) => elements.push(e),
+                        Ok(e) => {
+                            elements.push(e);
+                            first_elem = false;
+                        }
                         Err(err) => return Err(err),
                     }
                 }
                 None => return Err(JsonError::UnterminatedArray),
+            }
+        }
+    }
+
+    fn partial_read_object(&mut self) -> Result<JsonObject, JsonError> {
+        let mut elements: Vec<(String, JsonObject)> = Vec::new();
+        self.next();
+
+        loop {
+            match self.peek() {
+                Some('"') => {
+                    // Parse "key": val
+                    if let JsonObject::JsonString(key) = self.partial_read_string()? {
+                        if let Some(c @ (' ' | '\t' | '\r' | '\n')) = self.peek() {
+                            self.next();
+                        }
+                        if let Some(':') = self.peek() {
+                            // Parse element
+                            self.next();
+                            let element = self.partial_read(false)?;
+                            elements.push((key, element));
+                        } else {
+                            println!("error key1 : \"{:?}\"", self.peek());
+                            return Err(JsonError::NonStringAsKey);
+                        }
+                    } else {
+                        return Err(JsonError::NonStringAsKey);
+                    }
+                }
+                Some('}') => {
+                    self.next();
+                    return Ok(JsonObject::Object(elements));
+                }
+                Some(',') => {
+                    self.next();
+                    if let Some('}') = self.peek() {
+                        return Err(JsonError::InvalidChar('}', self.index));
+                    }
+                }
+                Some(' ' | '\t' | '\r' | '\n') => {
+                    self.index += 1;
+                }
+                Some(c) => {
+                    return Err(JsonError::InvalidChar(c, self.index));
+                }
+                None => return Err(JsonError::UnterminatedObject),
             }
         }
     }
@@ -287,46 +382,47 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use crate::JsonError;
-    use crate::JsonObject::{self, Array, Bool, JsonString, Null, Number};
+    use crate::JsonObject::{self, Array, Bool, JsonString, Null, Number, Object};
+    use crate::Parser;
+
+    fn test_read(s: &str) -> Result<JsonObject, JsonError> {
+        let mut parser = Parser::new(s);
+        parser.partial_read(false)
+    }
 
     #[test]
     fn test_empty() {
-        assert_eq!(JsonObject::read(""), Err(JsonError::Empty));
-        assert_eq!(JsonObject::read("    "), Err(JsonError::Empty));
-        assert_eq!(JsonObject::read("   \n\t \t   "), Err(JsonError::Empty));
+        assert_eq!(test_read(""), Err(JsonError::Empty));
+        assert_eq!(test_read("    "), Err(JsonError::Empty));
+        assert_eq!(test_read("   \n\t \t   "), Err(JsonError::Empty));
     }
 
     #[test]
     fn test_read_number() {
-        assert_eq!(JsonObject::read("0").unwrap(), Number(0.0));
-        assert_eq!(JsonObject::read("0.00").unwrap(), Number(0.0));
-        assert_eq!(JsonObject::read("10").unwrap(), Number(10.0));
-        assert_eq!(JsonObject::read("5632").unwrap(), Number(5632.0));
-        assert_eq!(JsonObject::read("1.2e3").unwrap(), Number(1200.0));
-        assert_eq!(JsonObject::read("4324.6234").unwrap(), Number(4324.6234));
-        assert_eq!(JsonObject::read("-4324.6234").unwrap(), Number(-4324.6234));
+        assert_eq!(test_read("0").unwrap(), Number(0.0));
+        assert_eq!(test_read("0.00").unwrap(), Number(0.0));
+        assert_eq!(test_read("10").unwrap(), Number(10.0));
+        assert_eq!(test_read("5632").unwrap(), Number(5632.0));
+        assert_eq!(test_read("1.2e3").unwrap(), Number(1200.0));
+        assert_eq!(test_read("4324.6234").unwrap(), Number(4324.6234));
+        assert_eq!(test_read("-4324.6234").unwrap(), Number(-4324.6234));
         assert_eq!(
-            JsonObject::read("4324. 6234"),
-            Err(JsonError::InvalidNumber)
+            test_read("0.123456789e-12").unwrap(),
+            Number(0.123456789e-12)
         );
+        assert_eq!(test_read("4324. 6234"), Err(JsonError::InvalidNumber));
     }
 
     #[test]
     fn test_read_fixed_strings() {
-        assert_eq!(JsonObject::read("false").unwrap(), Bool(false));
+        assert_eq!(test_read("false").unwrap(), Bool(false));
 
-        assert_eq!(
-            JsonObject::read("fa lse"),
-            Err(JsonError::InvalidChar(' ', 2))
-        );
+        assert_eq!(test_read("fa lse"), Err(JsonError::InvalidChar(' ', 2)));
 
-        assert_eq!(JsonObject::read("true").unwrap(), Bool(true));
-        assert_eq!(JsonObject::read("null").unwrap(), Null);
-        assert_eq!(
-            JsonObject::read("treadu"),
-            Err(JsonError::InvalidChar('e', 2))
-        );
-        assert_eq!(JsonObject::read("tru"), Err(JsonError::Empty));
+        assert_eq!(test_read("true").unwrap(), Bool(true));
+        assert_eq!(test_read("null").unwrap(), Null);
+        assert_eq!(test_read("treadu"), Err(JsonError::InvalidChar('e', 2)));
+        assert_eq!(test_read("tru"), Err(JsonError::Empty));
     }
 
     #[test]
@@ -347,31 +443,52 @@ mod tests {
         ];
 
         for (input, output) in tests {
-            assert_eq!(
-                JsonObject::read(input).unwrap(),
-                JsonString(output.to_string())
-            );
+            assert_eq!(test_read(input).unwrap(), JsonString(output.to_string()));
         }
     }
 
     #[test]
     fn test_read_array() {
-        assert_eq!(JsonObject::read("[]").unwrap(), Array(Vec::new()));
+        assert_eq!(test_read("[]").unwrap(), Array(Vec::new()));
         assert_eq!(
-            JsonObject::read("[1,2]").unwrap(),
+            test_read("[1,2]").unwrap(),
             Array(vec![Number(1.0), Number(2.0)])
         );
+        assert_eq!(test_read("[3,]"), Err(JsonError::InvalidChar(']', 3)));
+        assert_eq!(test_read("[3, , 3.2]"), Err(JsonError::InvalidChar(',', 4)));
         assert_eq!(
-            JsonObject::read("[3,]"),
-            Err(JsonError::InvalidChar(']', 3))
-        );
-        assert_eq!(
-            JsonObject::read("[3, , 3.2]"),
-            Err(JsonError::InvalidChar(',', 4))
-        );
-        assert_eq!(
-            JsonObject::read("[\"ciao\", 5.423]").unwrap(),
+            test_read("[\"ciao\", 5.423]").unwrap(),
             Array(vec![JsonString("ciao".to_string()), Number(5.423)])
         );
+
+        let res = test_read(
+            "[\"JSON Test Pattern pass1\", {\"object with 1 member\":[\"array with 1 element\"]}]",
+        );
+        assert_eq!(res.is_ok(), true);
+    }
+
+    #[test]
+    fn test_read_object() {
+        assert_eq!(test_read("{}").unwrap(), Object(Vec::new()));
+        assert_eq!(
+            test_read("{\"test\": true}").unwrap(),
+            Object(vec![("test".to_string(), Bool(true))])
+        );
+        assert_eq!(
+            test_read("{\"test\": true, \"other\": 42.13, \"testnull\": null}").unwrap(),
+            Object(vec![
+                ("test".to_string(), Bool(true)),
+                ("other".to_string(), Number(42.13)),
+                ("testnull".to_string(), Null)
+            ])
+        );
+
+        assert_eq!(
+            test_read("{\"object with 1 member\":[\"array with 1 element\"]}").unwrap(),
+            Object(vec![(
+                "object with 1 member".to_string(),
+                Array(vec![JsonString("array with 1 element".to_string())])
+            )])
+        )
     }
 }

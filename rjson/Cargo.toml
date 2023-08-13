@@ -14,3 +14,7 @@ path = "src/bin.rs"
 
 [dependencies]
 regex = "1.9.3"
+thiserror = "1.0.44"
+
+[dev-dependencies]
+rstest = "0.18.2"
