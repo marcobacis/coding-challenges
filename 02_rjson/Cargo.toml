@@ -8,10 +8,6 @@ edition = "2021"
 name = "rjson"
 path = "src/lib.rs"
 
-[[bin]]
-name = "rjson"
-path = "src/bin.rs"
-
 [dependencies]
 regex = "1.9.3"
 thiserror = "1.0.44"

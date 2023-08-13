@@ -1,7 +1,6 @@
-use rjson::{JsonError, JsonObject};
-use rstest::*;
-use std::env;
-use std::path::{Path, PathBuf};
+use rjson::JsonObject;
+use rstest::rstest;
+use std::path::PathBuf;
 
 #[rstest]
 fn files_pass(#[files("tests/files/pass*.json")] path: PathBuf) {

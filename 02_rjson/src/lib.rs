@@ -317,7 +317,7 @@ impl Parser {
                     self.next();
                     return Ok(JsonObject::Array(elements));
                 }
-                Some(c) => {
+                Some(_) => {
                     let elem = self.partial_read(false);
                     match elem {
                         Ok(e) => {
@@ -341,7 +341,7 @@ impl Parser {
                 Some('"') => {
                     // Parse "key": val
                     if let JsonObject::JsonString(key) = self.partial_read_string()? {
-                        if let Some(c @ (' ' | '\t' | '\r' | '\n')) = self.peek() {
+                        if let Some(_c @ (' ' | '\t' | '\r' | '\n')) = self.peek() {
                             self.next();
                         }
                         if let Some(':') = self.peek() {
