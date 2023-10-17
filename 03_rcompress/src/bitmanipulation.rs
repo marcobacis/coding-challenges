@@ -1,4 +1,4 @@
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 
 struct BitReader<R: Read> {
     index: usize,
@@ -40,8 +40,48 @@ impl<R: Read> BitReader<R> {
     }
 }
 
+struct BitWriter<W: Write> {
+    sink: BufWriter<W>,
+    current: u8,
+    index: usize,
+}
+
+impl<W: Write> BitWriter<W> {
+    pub fn new(sink: W) -> Self {
+        BitWriter {
+            sink: BufWriter::new(sink),
+            current: 0,
+            index: 0,
+        }
+    }
+
+    pub fn write(&mut self, bits: &[u8]) -> io::Result<usize> {
+        for bit in bits {
+            if self.index > 7 {
+                self.sink.write(&[self.current])?;
+                self.current = 0;
+                self.index = 0;
+            }
+            self.current = self.current | ((bit & 0x01) << self.index);
+            self.index += 1;
+        }
+        Ok(bits.len())
+    }
+
+    pub fn flush(&mut self) -> io::Result<()> {
+        if self.index > 0 {
+            self.sink.write(&[self.current])?;
+            return self.sink.flush();
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    use crate::bitmanipulation::BitWriter;
+
     use super::BitReader;
 
     #[test]
@@ -76,5 +116,85 @@ mod tests {
         let mut buf: [u8; 1] = [0];
         let mut reader = BitReader::new(&s[..]);
         assert_eq!(reader.read(&mut buf).unwrap(), 0);
+    }
+
+    #[test]
+    fn write_empty() {
+        let mut output = Vec::new();
+        {
+            let mut writer = BitWriter::new(&mut output);
+            writer.flush().unwrap();
+        }
+
+        assert_eq!(0, output.len());
+    }
+
+    #[test]
+    fn write_some_bits() {
+        let mut output = Vec::new();
+        {
+            let mut writer = BitWriter::new(&mut output);
+            writer.write(&[0x01]).unwrap();
+            writer.write(&[0x00]).unwrap();
+            writer.write(&[0x01]).unwrap();
+            writer.flush().unwrap();
+        }
+
+        assert_eq!(1, output.len());
+        assert_eq!([0x05], output[0..1]);
+    }
+
+    #[test]
+    fn write_more_than_one_bit_at_a_time() {
+        let mut output = Vec::new();
+        {
+            let mut writer = BitWriter::new(&mut output);
+            writer.write(&[0x01, 0x01, 0x01]).unwrap();
+            writer.flush().unwrap();
+        }
+
+        assert_eq!(1, output.len());
+        assert_eq!([0x07], output[0..1]);
+    }
+
+    #[test]
+    fn write_more_than_one_byte() {
+        let mut output = Vec::new();
+        {
+            let mut writer = BitWriter::new(&mut output);
+            let written = writer
+                .write(&[
+                    0x01, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, //first  byte
+                    0x00, 0x00, 0x00, 0x01, // second byte
+                ])
+                .unwrap();
+            writer.flush().unwrap();
+
+            assert_eq!(12, written);
+        }
+
+        assert_eq!(2, output.len());
+        assert_eq!([0xA7, 0x08], output[0..2]);
+    }
+
+    #[test]
+    fn write_and_read() {
+        let input = [
+            0x01, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, //first  byte
+            0x00, 0x00, 0x00, 0x01, // second byte
+        ];
+        let mut buffer = Vec::new();
+        {
+            let mut writer = BitWriter::new(&mut buffer);
+            writer.write(&input).unwrap();
+            writer.flush().unwrap();
+        }
+
+        let mut reader = BitReader::new(&buffer[..]);
+
+        let mut output = [0; 12];
+        reader.read(&mut output).unwrap();
+
+        assert_eq!(output, input);
     }
 }
