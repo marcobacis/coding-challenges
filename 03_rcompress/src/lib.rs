@@ -1,7 +1,10 @@
 use itertools::Itertools;
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-use std::collections::HashMap;
+use std::{
+    cmp::Ordering,
+    io::{self},
+};
+use std::{collections::BinaryHeap, io::Read};
+use std::{collections::HashMap, io::Write};
 
 pub mod bitmanipulation;
 
@@ -63,29 +66,34 @@ fn count_frequencies(s: &str) -> HashMap<u8, usize> {
     return counts;
 }
 
-fn encode_header(counts: HashMap<u8, usize>) -> Vec<u8> {
-    let mut bytes: Vec<u8> = Vec::new();
-    bytes.push(counts.len() as u8);
+fn encode_header<W: Write>(counts: HashMap<u8, usize>, writer: &mut W) -> io::Result<()> {
+    writer.write(&[counts.len() as u8])?;
     for (c, count) in counts.iter().sorted() {
-        bytes.push(*c);
-        (*count as u32).to_le_bytes().map(|b| bytes.push(b));
+        writer.write(&[*c as u8])?;
+        let count_bytes = (*count as u32).to_le_bytes();
+        writer.write(&count_bytes)?;
     }
-    bytes
+    Ok(())
 }
 
-fn decode_header(buf: Vec<u8>) -> HashMap<u8, usize> {
+fn decode_header<R: Read>(reader: &mut R) -> HashMap<u8, usize> {
     let mut counts: HashMap<u8, usize> = HashMap::new();
-    let len = buf[0] as usize;
-    for i in 0..len {
-        let c = buf[i * 5 + 1] as u8;
-        let count_bytes: [u8; 4] = buf[(i * 5 + 2)..(i * 5 + 5)].try_into().unwrap();
-        let count = u32::from_le_bytes(count_bytes);
-        counts.insert(c, count as usize);
+
+    // Read array size
+    let mut sizebuf: [u8; 1] = [0];
+    reader.read(&mut sizebuf).unwrap();
+    let size = sizebuf[0];
+
+    let mut buf = [0; 5];
+    for _ in 0..size {
+        // Read symbol and count
+        reader.read(&mut buf).unwrap();
+        let symbol = buf[0];
+        let count = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+        counts.insert(symbol, count);
     }
     counts
 }
-
-//fn decode_header(bytes: [u8]) -> HashMap<u8, usize> {}
 
 #[cfg(test)]
 mod tests {
@@ -93,7 +101,10 @@ mod tests {
         count_frequencies, create_huffman_tree, decode_header, encode_header, HuffmanTree::Leaf,
         HuffmanTree::Node,
     };
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        io::{BufReader, Write},
+    };
 
     fn assert_equal_freq(counts: HashMap<u8, usize>, expected: Vec<(u8, usize)>) {
         let expected_map: HashMap<u8, usize> = expected.into_iter().collect();
@@ -141,7 +152,8 @@ mod tests {
     #[test]
     fn test_encode_header() {
         let counts = count_frequencies("abacba");
-        let bytes = encode_header(counts);
+        let mut bytes = Vec::new();
+        encode_header(counts, &mut bytes).unwrap();
         assert_eq!(
             bytes,
             vec![
@@ -151,14 +163,16 @@ mod tests {
         )
     }
 
-    //#[test]
+    #[test]
     fn test_decode_header() {
         let encoded = vec![
             0x03, b'a', 0x03, 0x00, 0x00, 0x00, b'b', 0x02, 0x00, 0x00, 0x00, b'c', 0x01, 0x00,
             0x00, 0x00,
         ];
 
-        let counts = decode_header(encoded);
+        let mut reader = BufReader::new(&encoded[..]);
+
+        let counts = decode_header(&mut reader);
         assert_eq!(counts, HashMap::from([(b'a', 3), (b'b', 2), (b'c', 1)]));
     }
 }
