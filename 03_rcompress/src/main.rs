@@ -1,24 +1,39 @@
-use std::env;
-
+use clap::{Parser, Subcommand};
 use rcompress::{compress, decompress};
 
-fn print_usage(args: &Vec<String>) {
-    println!("Usage: {} compress|decompress input output", args[0]);
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    // Command to execute
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Path of the input file
+    #[arg(short, long)]
+    input: String,
+
+    /// Path of the output file
+    #[arg(short, long)]
+    output: String,
+}
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Compress,
+    Decompress,
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 4 {
-        print_usage(&args);
-    }
+    let args = Args::parse();
 
-    let method = args[1].clone();
-    let path_input = args[2].clone();
-    let path_output = args[3].clone();
+    let path_input = args.input;
+    let path_output = args.output;
 
-    match method.as_str() {
-        "compress" => compress(&path_input, &path_output).expect("Error during compression"),
-        "decompress" => decompress(&path_input, &path_output).expect("Error during decompression"),
-        _ => print_usage(&args),
+    match args.command {
+        Some(Commands::Compress) | None => {
+            compress(&path_input, &path_output).expect("Error during compression")
+        }
+        Some(Commands::Decompress) => {
+            decompress(&path_input, &path_output).expect("Error during decompression")
+        }
     };
 }
