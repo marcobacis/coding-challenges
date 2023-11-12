@@ -1,6 +1,6 @@
 use std::io::{self, BufReader, BufWriter, Read, Write};
 
-struct BitReader<R: Read> {
+pub struct BitReader<R: Read> {
     index: usize,
     current: u8,
     source: BufReader<R>,
@@ -8,7 +8,7 @@ struct BitReader<R: Read> {
 
 impl<R: Read> BitReader<R> {
     pub fn new(source: R) -> Self {
-        let mut reader = BitReader {
+        let reader = BitReader {
             index: 8,
             current: 0,
             source: BufReader::new(source),
@@ -40,7 +40,7 @@ impl<R: Read> BitReader<R> {
     }
 }
 
-struct BitWriter<W: Write> {
+pub struct BitWriter<W: Write> {
     sink: BufWriter<W>,
     current: u8,
     index: usize,
