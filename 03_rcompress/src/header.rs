@@ -54,8 +54,9 @@ mod tests {
 
     #[test]
     fn test_encode_header() {
+        let mut buf = "abacba".as_bytes();
         let header = Header {
-            counts: count_frequencies("abacba"),
+            counts: count_frequencies(&mut buf),
             filesize: 10,
         };
 
