@@ -1,8 +1,9 @@
 use bitmanipulation::BitReader;
+use header::Header;
 use std::{
     cmp::Ordering,
     fs::File,
-    io::{self, BufReader, BufWriter, Result},
+    io::{BufReader, BufWriter, Result},
 };
 use std::{collections::BinaryHeap, io::Read};
 use std::{collections::HashMap, io::Write};
@@ -10,6 +11,7 @@ use std::{collections::HashMap, io::Write};
 use crate::bitmanipulation::BitWriter;
 
 pub mod bitmanipulation;
+mod header;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum HuffmanTree {
@@ -141,50 +143,6 @@ fn count_frequencies(s: &str) -> Vec<(u8, usize)> {
     counts
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct Header {
-    counts: Vec<(u8, usize)>,
-    filesize: usize,
-}
-
-fn encode_header<W: Write>(header: &Header, writer: &mut W) -> io::Result<()> {
-    let size_bytes = header.filesize.to_le_bytes();
-    writer.write(&size_bytes)?;
-
-    writer.write(&[header.counts.len() as u8])?;
-    for (c, count) in header.counts.iter() {
-        writer.write(&[*c as u8])?;
-        let count_bytes = (*count as u32).to_le_bytes();
-        writer.write(&count_bytes)?;
-    }
-    Ok(())
-}
-
-fn decode_header<R: Read>(reader: &mut R) -> Result<Header> {
-    let mut counts: Vec<(u8, usize)> = Vec::new();
-
-    // Read file size
-    let mut filesizebuf: [u8; 8] = [0; 8];
-    reader.read(&mut filesizebuf)?;
-    let filesize = usize::from_le_bytes(filesizebuf);
-
-    // Read array size
-    let mut sizebuf: [u8; 1] = [0];
-    reader.read(&mut sizebuf)?;
-    let size = sizebuf[0];
-
-    let mut buf = [0; 5];
-    for _ in 0..size {
-        // Read symbol and count
-        reader.read(&mut buf)?;
-        let symbol = buf[0];
-        let count = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
-        counts.push((symbol, count));
-    }
-
-    Ok(Header { filesize, counts })
-}
-
 pub fn compress(input_path: &str, output_path: &str) -> Result<()> {
     // Read input
     let mut file = BufReader::new(File::open(input_path)?);
@@ -202,7 +160,10 @@ pub fn compress(input_path: &str, output_path: &str) -> Result<()> {
         counts: counts.clone(),
         filesize: buffer.len(),
     };
-    encode_header(&header, &mut output_file)?;
+    {
+        let header = &header;
+        header.write(&mut output_file)
+    }?;
 
     let mut writer = BitWriter::new(output_file);
 
@@ -218,7 +179,7 @@ pub fn compress(input_path: &str, output_path: &str) -> Result<()> {
 pub fn decompress(input_path: &str, output_path: &str) -> Result<()> {
     let mut input_file = BufReader::new(File::open(input_path)?);
 
-    let header = decode_header(&mut input_file)?;
+    let header = Header::read(&mut input_file)?;
     let tree = create_huffman_tree(header.counts);
 
     let mut reader = BitReader::new(&mut input_file);
@@ -253,13 +214,11 @@ pub fn decompress(input_path: &str, output_path: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufReader;
+
     use crate::{
-        count_frequencies, create_huffman_tree, decode_header, encode_header, Header,
-        HuffmanDecodeResult, HuffmanDecoder, HuffmanTree::Leaf, HuffmanTree::Node,
-    };
-    use std::{
-        collections::HashMap,
-        io::{BufReader, Write},
+        count_frequencies, create_huffman_tree, HuffmanDecodeResult, HuffmanDecoder,
+        HuffmanTree::Leaf, HuffmanTree::Node,
     };
 
     #[test]
@@ -327,46 +286,5 @@ mod tests {
 
         assert_eq!(HuffmanDecodeResult::Decoding, decoder.step(1));
         assert_eq!(HuffmanDecodeResult::Decoded(b'c'), decoder.step(0));
-    }
-
-    #[test]
-    fn test_encode_header() {
-        let header = Header {
-            counts: count_frequencies("abacba"),
-            filesize: 10,
-        };
-
-        let mut bytes = Vec::new();
-        encode_header(&header, &mut bytes).unwrap();
-        assert_eq!(
-            bytes,
-            vec![
-                0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // File Size
-                0x03, // Number of frequencies
-                b'a', 0x03, 0x00, 0x00, 0x00, b'b', 0x02, 0x00, 0x00, 0x00, b'c', 0x01, 0x00, 0x00,
-                0x00
-            ]
-        )
-    }
-
-    #[test]
-    fn test_decode_header() {
-        let encoded = vec![
-            0x75, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // File size
-            0x03, // Number of frequencies
-            b'a', 0x03, 0x00, 0x00, 0x00, b'b', 0x02, 0x00, 0x00, 0x00, b'c', 0x01, 0x00, 0x00,
-            0x00,
-        ];
-
-        let mut reader = BufReader::new(&encoded[..]);
-
-        let counts = decode_header(&mut reader).unwrap();
-        assert_eq!(
-            counts,
-            Header {
-                counts: vec![(b'a', 3), (b'b', 2), (b'c', 1)],
-                filesize: 2677
-            }
-        );
     }
 }
