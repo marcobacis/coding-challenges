@@ -1,0 +1,12 @@
+[package]
+name = "rcut"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rcut"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4.4.8", features = ["derive"] }
+regex = "1.10.3"
