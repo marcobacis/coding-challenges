@@ -1,8 +1,7 @@
 use std::{
-    fmt,
     fs::File,
-    io::{self, BufRead, BufReader, Error},
-    num::ParseIntError,
+    io::{self, BufRead, BufReader},
+    process::exit,
 };
 
 use clap::Parser;
@@ -37,7 +36,9 @@ struct Args {
 }
 
 fn usage() {
-    println!("usage: cut -f list [-s] [-w | -d delim] [file ...]");
+    println!("usage: rcut -b list [file ...]");
+    println!("       rcut -c list [file ...]");
+    println!("       rcut -f list [-s] [-w | -d delim] [file ...]");
 }
 
 fn main() {
@@ -80,7 +81,13 @@ fn check_args(args: &Args) {
         commands_called += 1;
     }
 
+    if args.help {
+        usage();
+        exit(0);
+    }
+
     if commands_called != 1 {
         usage();
+        exit(1);
     }
 }
