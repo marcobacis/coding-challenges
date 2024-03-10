@@ -1,0 +1,17 @@
+[package]
+name = "lb"
+version = "0.1.0"
+edition = "2021"
+authors = ["Marco Bacis <marc.bacis@gmail.com>"]
+
+[[bin]]
+name = "lb"
+path = "src/lb/bin.rs"
+
+[[bin]]
+name = "backend"
+path = "src/backend.rs"
+
+[dependencies]
+actix-web = "4.5.1"
+tokio = "1.36.0"
