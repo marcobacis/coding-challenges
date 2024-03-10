@@ -7,13 +7,13 @@ use actix_web::{
 
 #[derive(Debug)]
 enum LBError {
-    RedirectError(reqwest::Error),
+    BackendError(reqwest::Error),
 }
 
 impl Display for LBError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RedirectError(source) => f.write_fmt(format_args!("{:?}", source)),
+            Self::BackendError(source) => f.write_fmt(format_args!("{:?}", source)),
         }
     }
 }
@@ -53,7 +53,7 @@ async fn forward(
     let response = request_builder
         .send()
         .await
-        .map_err(|err| LBError::RedirectError(err))?;
+        .map_err(|err| LBError::BackendError(err))?;
 
     let mut response_builder = HttpResponse::build(response.status());
     for h in response.headers().iter() {
@@ -62,14 +62,14 @@ async fn forward(
     let body = response
         .bytes()
         .await
-        .map_err(|err| LBError::RedirectError(err))?;
+        .map_err(|err| LBError::BackendError(err))?;
 
     Ok(response_builder.body(body))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| App::new().route("/{requested:.*}", web::get().to(handler)))
+    HttpServer::new(|| App::new().default_service(web::to(handler)))
         .bind(("127.0.0.1", 8080))?
         .run()
         .await
