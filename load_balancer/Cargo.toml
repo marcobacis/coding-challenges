@@ -14,4 +14,5 @@ path = "src/backend.rs"
 
 [dependencies]
 actix-web = "4.5.1"
+reqwest = "0.11.25"
 tokio = "1.36.0"
