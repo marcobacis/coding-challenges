@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use actix_web::{
     http::{header::ContentType, Error, StatusCode},
-    web, App, HttpRequest, HttpResponse, HttpServer, ResponseError,
+    web, App, HttpMessage, HttpRequest, HttpResponse, HttpServer, ResponseError,
 };
 
 #[derive(Debug)]
@@ -30,47 +30,93 @@ impl ResponseError for LBError {
     }
 }
 
-async fn handler(req: HttpRequest, payload: web::Bytes) -> Result<HttpResponse, LBError> {
-    println!("{}", req.uri());
-    // TODO Get server
-    let server = "http://127.0.0.1:8081";
-    forward(req, payload, server).await
+struct LoadBalancer {
+    port: u16,
+    servers: Vec<String>,
 }
 
-async fn forward(
-    req: HttpRequest,
-    payload: web::Bytes,
-    server: &str,
-) -> Result<HttpResponse, LBError> {
-    let uri = format!("{}{}", server, req.uri());
-
-    let client = reqwest::Client::new();
-    let request_builder = client
-        .request(req.method().clone(), uri)
-        .headers(req.headers().clone().into())
-        .body(payload.clone());
-
-    let response = request_builder
-        .send()
-        .await
-        .map_err(|err| LBError::BackendError(err))?;
-
-    let mut response_builder = HttpResponse::build(response.status());
-    for h in response.headers().iter() {
-        response_builder.append_header(h);
+impl LoadBalancer {
+    pub fn new(port: u16, servers: Vec<String>) -> Self {
+        Self { port, servers }
     }
-    let body = response
-        .bytes()
-        .await
-        .map_err(|err| LBError::BackendError(err))?;
 
-    Ok(response_builder.body(body))
+    pub async fn run(&self) {
+        HttpServer::new(|| App::new())
+            .bind(("127.0.0.1", self.port))
+            .unwrap()
+            .run()
+            .await;
+    }
+
+    pub fn uri(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    async fn handler(&self, req: HttpRequest) -> Result<HttpResponse, LBError> {
+        println!("{}", req.uri());
+        // TODO Get server from policy
+        self.forward(req, self.servers.first().unwrap()).await
+    }
+
+    async fn forward(&self, req: HttpRequest, server: &str) -> Result<HttpResponse, LBError> {
+        let uri = format!("{}{}", server, req.uri());
+
+        let client = reqwest::Client::new();
+        let request_builder = client
+            .request(req.method().clone(), uri)
+            .headers(req.headers().clone().into());
+        //.body(payload.clone());
+
+        let response = request_builder
+            .send()
+            .await
+            .map_err(|err| LBError::BackendError(err))?;
+
+        let mut response_builder = HttpResponse::build(response.status());
+        for h in response.headers().iter() {
+            response_builder.append_header(h);
+        }
+        let body = response
+            .bytes()
+            .await
+            .map_err(|err| LBError::BackendError(err))?;
+
+        Ok(response_builder.body(body))
+    }
 }
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| App::new().default_service(web::to(handler)))
-        .bind(("127.0.0.1", 8080))?
+#[tokio::main]
+async fn main() {
+    LoadBalancer::new(8080, vec![String::from("http://127.0.0.1:8081")])
         .run()
-        .await
+        .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::StatusCode;
+    use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+
+    use crate::LoadBalancer;
+
+    #[tokio::test]
+    async fn cose() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let server = LoadBalancer::new(8080, vec![mock_server.uri()]);
+        let server_uri = server.uri();
+
+        tokio::spawn(async move { server.run().await });
+
+        let client = reqwest::Client::new();
+        let response = client.get(server_uri).send().await.unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+    }
 }
