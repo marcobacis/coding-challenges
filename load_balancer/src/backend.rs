@@ -1,9 +1,9 @@
 use std::io::Error;
 
-use actix_web::{get, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
 use clap::{Arg, Command};
 
-async fn hello(req: HttpRequest, payload: web::Bytes) -> Result<HttpResponse, Error> {
+async fn hello(req: HttpRequest, _payload: web::Bytes) -> Result<HttpResponse, Error> {
     let uri = req.uri();
     println!("Received request on \"{}\"", uri);
     Ok(HttpResponse::Ok().body("Hello world!"))

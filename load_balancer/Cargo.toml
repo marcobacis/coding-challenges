@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Marco Bacis <marc.bacis@gmail.com>"]
 
+[lib]
+name = "lb"
+path = "src/lib.rs"
+
 [[bin]]
 name = "lb"
-path = "src/lb/bin.rs"
+path = "src/bin.rs"
 
 [[bin]]
 name = "backend"
