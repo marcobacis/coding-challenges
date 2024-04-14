@@ -56,6 +56,7 @@ impl LoadBalancer {
         let app_data = web::Data::new(AppState {
             servers: self.servers.clone(),
             policy: Policy::new(self.servers.clone()),
+            client: Client::new(),
         });
 
         HttpServer::new(move || {
@@ -79,6 +80,7 @@ impl LoadBalancer {
 struct AppState {
     servers: Vec<String>,
     policy: Policy,
+    client: Client,
 }
 
 async fn handler(
@@ -86,13 +88,13 @@ async fn handler(
     data: web::Data<AppState>,
     bytes: web::Bytes,
 ) -> Result<HttpResponse, LBError> {
-    let server = data.policy.next();
+    let server = data.policy.next().await;
     let uri = format!("{}{}", server, req.uri());
 
-    let client = Client::new();
-    let request_builder = client
+    let request_builder = data
+        .client
         .request(req.method().clone(), uri)
-        .headers(req.headers().clone().into())
+        .headers(req.headers().into())
         .body(bytes);
 
     let response = request_builder
