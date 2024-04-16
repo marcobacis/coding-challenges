@@ -1,13 +1,13 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::Arc};
 
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web, App, HttpRequest, HttpResponse, HttpServer, ResponseError,
 };
-use policies::Policy;
+use policies::RoutingPolicy;
 use reqwest::Client;
 
-mod policies;
+pub mod policies;
 
 #[derive(Debug)]
 enum LBError {
@@ -34,9 +34,19 @@ impl ResponseError for LBError {
     }
 }
 
-pub struct LoadBalancer {
+#[derive(Clone)]
+pub struct Backend {
+    pub url: String,
+    pub health_url: String,
+}
+
+pub struct LoadBalancer<P>
+where
+    P: RoutingPolicy + 'static,
+{
     port: u16,
-    servers: Vec<String>,
+    servers: Vec<Backend>,
+    policy: Arc<P>,
 }
 
 #[actix_web::get("/health")]
@@ -44,18 +54,19 @@ async fn healthcheck() -> &'static str {
     "Ok"
 }
 
-impl LoadBalancer {
-    pub fn new(port: u16, servers: Vec<String>) -> Self {
+impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
+    pub fn new(port: u16, servers: Vec<Backend>, policy: Arc<P>) -> Self {
         Self {
-            port: port,
+            port,
             servers,
+            policy,
         }
     }
 
     pub async fn run(&self) {
         let app_data = web::Data::new(AppState {
             servers: self.servers.clone(),
-            policy: Policy::new(self.servers.clone()),
+            policy: self.policy.clone(),
             client: Client::new(),
         });
 
@@ -63,7 +74,7 @@ impl LoadBalancer {
             App::new()
                 .app_data(app_data.clone())
                 .service(healthcheck)
-                .default_service(web::to(handler))
+                .default_service(web::to(handler::<P>))
         })
         .bind(("127.0.0.1", self.port))
         .unwrap()
@@ -77,18 +88,21 @@ impl LoadBalancer {
     }
 }
 
-struct AppState {
-    servers: Vec<String>,
-    policy: Policy,
+struct AppState<P: RoutingPolicy> {
+    servers: Vec<Backend>,
+    policy: Arc<P>,
     client: Client,
 }
 
-async fn handler(
+async fn handler<P>(
     req: HttpRequest,
-    data: web::Data<AppState>,
+    data: web::Data<AppState<P>>,
     bytes: web::Bytes,
-) -> Result<HttpResponse, LBError> {
-    let server = data.policy.next().await;
+) -> Result<HttpResponse, LBError>
+where
+    P: RoutingPolicy,
+{
+    let server = data.policy.next(&req, &data.servers);
     let uri = format!("{}{}", server, req.uri());
 
     let request_builder = data
@@ -114,6 +128,8 @@ async fn handler(
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
+
+    use crate::policies::RoundRobinPolicy;
 
     use super::*;
     use reqwest::{ClientBuilder, StatusCode};
@@ -145,8 +161,15 @@ mod tests {
             .await;
 
         let client = Client::new();
-
-        let server = LoadBalancer::new(8080, vec![mock_server.uri()]);
+        let policy = Arc::new(RoundRobinPolicy::new());
+        let server = LoadBalancer::new(
+            8080,
+            vec![Backend {
+                url: mock_server.uri(),
+                health_url: format!("{}/health", mock_server.uri()),
+            }],
+            policy,
+        );
         let server_uri = server.uri();
         tokio::spawn(async move { server.run().await });
 
@@ -172,7 +195,16 @@ mod tests {
             .build()
             .unwrap();
 
-        let server = LoadBalancer::new(8081, vec![mock_server.uri()]);
+        let policy = Arc::new(RoundRobinPolicy::new());
+
+        let server = LoadBalancer::new(
+            8081,
+            vec![Backend {
+                url: mock_server.uri(),
+                health_url: format!("{}/health", mock_server.uri()),
+            }],
+            policy,
+        );
         let server_uri = server.uri();
         tokio::spawn(async move { server.run().await });
 
@@ -213,8 +245,20 @@ mod tests {
             .build()
             .unwrap();
 
+        let policy = Arc::new(RoundRobinPolicy::new());
+
         // Spawn server
-        let server = LoadBalancer::new(8082, mocks.iter().map(|mock| mock.uri()).collect());
+        let server = LoadBalancer::new(
+            8082,
+            mocks
+                .iter()
+                .map(|mock| Backend {
+                    url: mock.uri(),
+                    health_url: format!("{}/health", mock.uri()),
+                })
+                .collect(),
+            policy,
+        );
         let server_uri = server.uri();
         tokio::spawn(async move { server.run().await });
         wait_server_up(&client, &server_uri, 3).await;

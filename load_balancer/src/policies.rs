@@ -1,32 +1,44 @@
-use tokio::sync::RwLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub struct Policy {
-    servers: Vec<String>,
-    idx: RwLock<usize>,
+use actix_web::HttpRequest;
+
+use crate::Backend;
+
+pub trait RoutingPolicy {
+    fn next(&self, request: &HttpRequest, servers: &Vec<Backend>) -> String;
 }
 
-impl Policy {
-    pub fn new(servers: Vec<String>) -> Self {
+pub struct RoundRobinPolicy {
+    idx: AtomicUsize,
+}
+
+impl Default for RoundRobinPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RoundRobinPolicy {
+    pub fn new() -> Self {
         Self {
-            servers,
-            idx: RwLock::new(0),
+            idx: AtomicUsize::new(0),
         }
     }
+}
 
-    pub async fn next(&self) -> &str {
-        let max_server_idx = self.servers.len() - 1;
+impl RoutingPolicy for RoundRobinPolicy {
+    fn next(&self, _request: &HttpRequest, servers: &Vec<Backend>) -> String {
+        let max_server_idx = servers.len() - 1;
 
         // Update index
-        let idx = {
-            let mut idx = self.idx.write().await;
-            let current_idx = *idx;
-            *idx = match *idx {
-                x if x >= max_server_idx => 0,
-                c => c + 1,
-            };
-            current_idx
-        };
+        let idx = self
+            .idx
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |idx| match idx {
+                x if x >= max_server_idx => Some(0),
+                c => Some(c + 1),
+            })
+            .unwrap_or_default();
 
-        self.servers.get(idx).unwrap()
+        servers.get(idx).unwrap().url.clone()
     }
 }
