@@ -973,6 +973,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "join"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "661c069d78f918425b3e2d7f453b969f1307b5ffbd5a8571df5d2cd2074b76c6"
+dependencies = [
+ "join_impl",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "join_impl"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82d60505dff59af7b670a2cbe9bfe133dbdf65552989138e26f042c7f6f18dbc"
+dependencies = [
+ "lazy_static",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -999,6 +1021,8 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "clap",
+ "futures",
+ "join",
  "reqwest",
  "tokio",
  "wiremock",

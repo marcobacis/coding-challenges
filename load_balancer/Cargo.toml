@@ -19,6 +19,8 @@ path = "src/backend.rs"
 [dependencies]
 actix-web = "4.5.1"
 clap = "4.5.2"
+futures = "0.3.30"
+join = "0.3.1"
 reqwest = "0.11.25"
 tokio = { version="1.36.0", features = ["macros", "rt-multi-thread"] }
 
