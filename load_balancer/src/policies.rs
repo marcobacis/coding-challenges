@@ -2,32 +2,42 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use actix_web::HttpRequest;
 
+use tokio::sync::RwLock;
+
 use crate::Backend;
 
 pub trait RoutingPolicy {
-    fn next(&self, request: &HttpRequest, servers: &Vec<Backend>) -> String;
+    fn next(&self, request: &HttpRequest) -> impl std::future::Future<Output = String>;
+
+    fn health_results(
+        &self,
+        results: Vec<Backend>,
+    ) -> impl std::future::Future<Output = ()> + std::marker::Send;
 }
 
 pub struct RoundRobinPolicy {
     idx: AtomicUsize,
+    servers: RwLock<Vec<Backend>>,
 }
 
 impl Default for RoundRobinPolicy {
     fn default() -> Self {
-        Self::new()
+        Self::new(vec![])
     }
 }
 
 impl RoundRobinPolicy {
-    pub fn new() -> Self {
+    pub fn new(servers: Vec<Backend>) -> Self {
         Self {
             idx: AtomicUsize::new(0),
+            servers: RwLock::new(servers.clone()),
         }
     }
 }
 
 impl RoutingPolicy for RoundRobinPolicy {
-    fn next(&self, _request: &HttpRequest, servers: &Vec<Backend>) -> String {
+    async fn next(&self, _request: &HttpRequest) -> String {
+        let servers = self.servers.read().await.clone();
         let max_server_idx = servers.len() - 1;
 
         // Update index
@@ -40,5 +50,10 @@ impl RoutingPolicy for RoundRobinPolicy {
             .unwrap_or_default();
 
         servers.get(idx).unwrap().url.clone()
+    }
+
+    async fn health_results(&self, results: Vec<Backend>) {
+        let mut servers = self.servers.write().await;
+        *servers = results;
     }
 }

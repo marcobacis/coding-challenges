@@ -1,18 +1,18 @@
-use std::{iter::zip, sync::mpsc::Sender, time::Duration};
+use std::{iter::zip, time::Duration};
 
 use futures::future::join_all;
-use reqwest::Client;
-use tokio::time;
+use reqwest::{Client, Error, Response};
+use tokio::{sync::mpsc::Sender, time};
 
-use crate::Backend;
+use crate::{Backend, Config};
 
-pub async fn health_thread(config: Vec<Backend>, sender: &mut Sender<Vec<Backend>>) {
+pub async fn health_thread(config: Config, sender: &Sender<Vec<Backend>>) {
     let mut interval = time::interval(Duration::from_secs(30));
 
     loop {
         let healthy_backends = get_healthy_backends(&config).await;
 
-        sender.send(healthy_backends);
+        sender.send(healthy_backends).await;
 
         interval.tick().await;
     }
@@ -23,7 +23,14 @@ async fn get_healthy_backends(backends: &Vec<Backend>) -> Vec<Backend> {
 
     let results = join_all(backends.iter().map(|b| client.get(&b.health_url).send())).await;
 
-    zip(backends, results.iter().map(|r| r.is_ok()))
+    zip(backends, results.iter().map(is_healthy))
         .filter_map(|(b, res)| if res { Some(b.clone()) } else { None })
         .collect()
+}
+
+fn is_healthy(res: &Result<Response, Error>) -> bool {
+    match res {
+        Ok(response) => response.status().is_success(),
+        _ => false,
+    }
 }

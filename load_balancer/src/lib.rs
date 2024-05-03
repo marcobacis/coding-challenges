@@ -5,8 +5,11 @@ use actix_web::{
     web::{self, Data},
     App, HttpRequest, HttpResponse, HttpServer, ResponseError,
 };
+use tokio::sync::mpsc::channel;
+
 use policies::RoutingPolicy;
 use reqwest::Client;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 mod health;
 pub mod policies;
@@ -36,20 +39,21 @@ impl ResponseError for LBError {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Backend {
     pub url: String,
     pub health_url: String,
 }
+
+pub type Config = Vec<Backend>;
 
 pub struct LoadBalancer<P>
 where
     P: RoutingPolicy + 'static,
 {
     port: u16,
-    servers: Vec<Backend>,
-    policy: Arc<P>,
     data: Arc<AppState<P>>,
+    config: Config,
 }
 
 #[actix_web::get("/health")]
@@ -58,21 +62,35 @@ async fn healthcheck() -> &'static str {
 }
 
 impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
-    pub fn new(port: u16, servers: Vec<Backend>, policy: Arc<P>) -> Self {
+    pub fn new(port: u16, config: Config, policy: Arc<P>) -> Self {
         Self {
             port,
-            servers: servers.clone(),
-            policy: policy.clone(),
             data: Arc::new(AppState {
-                servers: servers.clone(),
                 policy: policy.clone(),
                 client: Client::new(),
             }),
+            config,
         }
     }
 
     pub async fn run(&self) {
         let app_data = Data::from(self.data.clone());
+
+        let (tx, mut rx): (Sender<Vec<Backend>>, Receiver<Vec<Backend>>) = channel(32);
+
+        // Start health check task
+        let config_clone = self.config.clone();
+        tokio::spawn(async move {
+            health::health_thread(config_clone, &tx).await;
+        });
+
+        // Halth check receiver
+        let data = self.data.clone();
+        tokio::spawn(async move {
+            while let Some(healthy_backends) = rx.recv().await {
+                data.policy.health_results(healthy_backends).await;
+            }
+        });
 
         HttpServer::new(move || {
             App::new()
@@ -93,7 +111,6 @@ impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
 }
 
 struct AppState<P: RoutingPolicy> {
-    servers: Vec<Backend>,
     policy: Arc<P>,
     client: Client,
 }
@@ -106,7 +123,7 @@ async fn handler<P>(
 where
     P: RoutingPolicy,
 {
-    let server = data.policy.next(&req, &data.servers);
+    let server = data.policy.next(&req).await;
     let uri = format!("{}{}", server, req.uri());
 
     let request_builder = data
