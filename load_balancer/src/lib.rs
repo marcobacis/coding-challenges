@@ -1,10 +1,8 @@
-use std::{fmt::Display, sync::Arc};
+use std::sync::Arc;
 
-use crate::config::{Backend, Config};
 use actix_web::{
-    http::{header::ContentType, StatusCode},
     web::{self, Data},
-    App, HttpRequest, HttpResponse, HttpServer, ResponseError,
+    App, HttpRequest, HttpResponse, HttpServer,
 };
 use health::HealthResult;
 use tokio::sync::mpsc::channel;
@@ -14,33 +12,14 @@ use reqwest::Client;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub mod config;
+
+pub use config::Backend;
+pub use config::Config;
+pub use error::Error;
+
+pub mod error;
 mod health;
 pub mod policies;
-
-#[derive(Debug)]
-enum LBError {
-    BackendError(reqwest::Error),
-}
-
-impl Display for LBError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BackendError(source) => f.write_fmt(format_args!("{:?}", source)),
-        }
-    }
-}
-
-impl ResponseError for LBError {
-    fn status_code(&self) -> StatusCode {
-        StatusCode::INTERNAL_SERVER_ERROR
-    }
-
-    fn error_response(&self) -> HttpResponse<actix_web::body::BoxBody> {
-        HttpResponse::build(self.status_code())
-            .insert_header(ContentType::html())
-            .body(self.to_string())
-    }
-}
 
 pub struct LoadBalancer<P>
 where
@@ -114,7 +93,7 @@ async fn handler<P>(
     req: HttpRequest,
     data: web::Data<AppState<P>>,
     bytes: web::Bytes,
-) -> Result<HttpResponse, LBError>
+) -> Result<HttpResponse, Error>
 where
     P: RoutingPolicy,
 {
@@ -127,16 +106,13 @@ where
         .headers(req.headers().into())
         .body(bytes);
 
-    let response = request_builder
-        .send()
-        .await
-        .map_err(LBError::BackendError)?;
+    let response = request_builder.send().await?;
 
     let mut response_builder = HttpResponse::build(response.status());
     for h in response.headers().iter() {
         response_builder.append_header(h);
     }
-    let body = response.bytes().await.map_err(LBError::BackendError)?;
+    let body = response.bytes().await?;
 
     Ok(response_builder.body(body))
 }

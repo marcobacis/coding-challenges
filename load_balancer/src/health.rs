@@ -32,7 +32,12 @@ pub async fn health_thread(config: Config, sender: &Sender<Vec<HealthResult>>) {
 async fn get_healthy_backends(backends: &Vec<Backend>) -> Vec<HealthResult> {
     let client = Client::new();
 
-    let results = join_all(backends.iter().map(|b| client.get(&b.health_url).send())).await;
+    let results = join_all(backends.iter().map(|b| {
+        client
+            .get(format!("{}{}", &b.url, &b.healthcheck_path))
+            .send()
+    }))
+    .await;
 
     zip(backends, results.iter().map(is_healthy))
         .map(|(backend, healthy)| HealthResult {

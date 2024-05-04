@@ -24,7 +24,7 @@ pub fn build_config(mocks: &[MockServer]) -> Config {
         .iter()
         .map(|mock| Backend {
             url: mock.uri(),
-            health_url: format!("{}/health", mock.uri()),
+            healthcheck_path: "/health".into(),
         })
         .collect();
 
