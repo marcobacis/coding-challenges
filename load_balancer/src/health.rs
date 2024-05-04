@@ -10,7 +10,7 @@ pub async fn health_thread(config: Config, sender: &Sender<Vec<Backend>>) {
     let mut interval = time::interval(Duration::from_secs(30));
 
     loop {
-        let healthy_backends = get_healthy_backends(&config).await;
+        let healthy_backends = get_healthy_backends(&config.backends).await;
 
         sender.send(healthy_backends).await;
 

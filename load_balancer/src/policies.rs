@@ -4,7 +4,7 @@ use actix_web::HttpRequest;
 
 use tokio::sync::RwLock;
 
-use crate::Backend;
+use crate::{Backend, Config};
 
 pub trait RoutingPolicy {
     fn next(&self, request: &HttpRequest) -> impl std::future::Future<Output = String>;
@@ -17,27 +17,27 @@ pub trait RoutingPolicy {
 
 pub struct RoundRobinPolicy {
     idx: AtomicUsize,
-    servers: RwLock<Vec<Backend>>,
+    backends: RwLock<Vec<Backend>>,
 }
 
 impl Default for RoundRobinPolicy {
     fn default() -> Self {
-        Self::new(vec![])
+        Self::new(&Config::default())
     }
 }
 
 impl RoundRobinPolicy {
-    pub fn new(servers: Vec<Backend>) -> Self {
+    pub fn new(config: &Config) -> Self {
         Self {
             idx: AtomicUsize::new(0),
-            servers: RwLock::new(servers.clone()),
+            backends: RwLock::new(config.backends.clone()),
         }
     }
 }
 
 impl RoutingPolicy for RoundRobinPolicy {
     async fn next(&self, _request: &HttpRequest) -> String {
-        let servers = self.servers.read().await.clone();
+        let servers = self.backends.read().await.clone();
         let max_server_idx = servers.len() - 1;
 
         // Update index
@@ -53,7 +53,7 @@ impl RoutingPolicy for RoundRobinPolicy {
     }
 
     async fn health_results(&self, results: Vec<Backend>) {
-        let mut servers = self.servers.write().await;
+        let mut servers = self.backends.write().await;
         *servers = results;
     }
 }

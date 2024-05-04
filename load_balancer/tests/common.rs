@@ -20,7 +20,7 @@ pub async fn create_mocks(n: usize) -> Vec<MockServer> {
 }
 
 pub fn build_config(mocks: &[MockServer]) -> Config {
-    let config = mocks
+    let backends = mocks
         .iter()
         .map(|mock| Backend {
             url: mock.uri(),
@@ -28,5 +28,5 @@ pub fn build_config(mocks: &[MockServer]) -> Config {
         })
         .collect();
 
-    config
+    Config { backends }
 }

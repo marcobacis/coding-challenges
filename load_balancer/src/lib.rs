@@ -45,7 +45,10 @@ pub struct Backend {
     pub health_url: String,
 }
 
-pub type Config = Vec<Backend>;
+#[derive(Clone, Debug, Default)]
+pub struct Config {
+    pub backends: Vec<Backend>,
+}
 
 pub struct LoadBalancer<P>
 where

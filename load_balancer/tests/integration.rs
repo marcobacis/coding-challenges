@@ -23,7 +23,7 @@ async fn test_get_root() {
 
     let client = Client::new();
 
-    let policy = Arc::new(RoundRobinPolicy::new(config.clone()));
+    let policy = Arc::new(RoundRobinPolicy::new(&config));
 
     let server = LoadBalancer::new(8080, config, policy);
     let server_uri = server.uri();
@@ -56,7 +56,7 @@ async fn test_post_root() {
         .build()
         .unwrap();
 
-    let policy = Arc::new(RoundRobinPolicy::new(config.clone()));
+    let policy = Arc::new(RoundRobinPolicy::new(&config));
     let server = LoadBalancer::new(8081, config, policy);
     let server_uri = server.uri();
     tokio::spawn(async move { server.run().await });
@@ -92,7 +92,7 @@ async fn test_round_robin_three_servers() {
         .build()
         .unwrap();
 
-    let policy = Arc::new(RoundRobinPolicy::new(config.clone()));
+    let policy = Arc::new(RoundRobinPolicy::new(&config));
 
     // Spawn server
     let server = LoadBalancer::new(8082, config, policy);

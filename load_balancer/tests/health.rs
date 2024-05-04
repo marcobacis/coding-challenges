@@ -23,7 +23,7 @@ async fn test_health_check_simple() {
         .build()
         .unwrap();
 
-    let policy = Arc::new(RoundRobinPolicy::new(config.clone()));
+    let policy = Arc::new(RoundRobinPolicy::new(&config));
     let server = LoadBalancer::new(8082, config, policy);
     let server_uri = server.uri();
 
