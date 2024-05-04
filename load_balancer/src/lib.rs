@@ -1,16 +1,19 @@
 use std::{fmt::Display, sync::Arc};
 
+use crate::config::{Backend, Config};
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web::{self, Data},
     App, HttpRequest, HttpResponse, HttpServer, ResponseError,
 };
+use health::HealthResult;
 use tokio::sync::mpsc::channel;
 
 use policies::RoutingPolicy;
 use reqwest::Client;
 use tokio::sync::mpsc::{Receiver, Sender};
 
+pub mod config;
 mod health;
 pub mod policies;
 
@@ -37,17 +40,6 @@ impl ResponseError for LBError {
             .insert_header(ContentType::html())
             .body(self.to_string())
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct Backend {
-    pub url: String,
-    pub health_url: String,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Config {
-    pub backends: Vec<Backend>,
 }
 
 pub struct LoadBalancer<P>
@@ -79,7 +71,7 @@ impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
     pub async fn run(&self) {
         let app_data = Data::from(self.data.clone());
 
-        let (tx, mut rx): (Sender<Vec<Backend>>, Receiver<Vec<Backend>>) = channel(32);
+        let (tx, mut rx): (Sender<Vec<HealthResult>>, Receiver<Vec<HealthResult>>) = channel(32);
 
         // Start health check task
         let config_clone = self.config.clone();

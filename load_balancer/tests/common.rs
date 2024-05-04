@@ -1,5 +1,5 @@
 use futures::future::join_all;
-use lb::{Backend, Config};
+use lb::config::{Backend, Config};
 use reqwest::Client;
 use wiremock::MockServer;
 
@@ -28,5 +28,8 @@ pub fn build_config(mocks: &[MockServer]) -> Config {
         })
         .collect();
 
-    Config { backends }
+    Config {
+        backends,
+        healthcheck_interval_secs: 5,
+    }
 }

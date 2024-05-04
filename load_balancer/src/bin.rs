@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use lb::{policies::RoundRobinPolicy, Backend, Config, LoadBalancer};
+use lb::{config::Backend, config::Config, policies::RoundRobinPolicy, LoadBalancer};
 
 #[tokio::main]
 async fn main() {
     let config = Config {
+        healthcheck_interval_secs: 30,
         backends: vec![
             Backend {
                 url: String::from("http://127.0.0.1:8081"),

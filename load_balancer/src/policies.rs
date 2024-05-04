@@ -4,14 +4,14 @@ use actix_web::HttpRequest;
 
 use tokio::sync::RwLock;
 
-use crate::{Backend, Config};
+use crate::{health::HealthResult, Backend, Config};
 
 pub trait RoutingPolicy {
     fn next(&self, request: &HttpRequest) -> impl std::future::Future<Output = String>;
 
     fn health_results(
         &self,
-        results: Vec<Backend>,
+        results: Vec<HealthResult>,
     ) -> impl std::future::Future<Output = ()> + std::marker::Send;
 }
 
@@ -52,8 +52,12 @@ impl RoutingPolicy for RoundRobinPolicy {
         servers.get(idx).unwrap().url.clone()
     }
 
-    async fn health_results(&self, results: Vec<Backend>) {
+    async fn health_results(&self, results: Vec<HealthResult>) {
         let mut servers = self.backends.write().await;
-        *servers = results;
+        *servers = results
+            .iter()
+            .filter(|r| r.is_healthy())
+            .map(|r| r.backend.clone())
+            .collect();
     }
 }

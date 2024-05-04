@@ -6,25 +6,39 @@ use tokio::{sync::mpsc::Sender, time};
 
 use crate::{Backend, Config};
 
-pub async fn health_thread(config: Config, sender: &Sender<Vec<Backend>>) {
-    let mut interval = time::interval(Duration::from_secs(30));
+pub struct HealthResult {
+    pub backend: Backend,
+    healthy: bool,
+}
+
+impl HealthResult {
+    pub fn is_healthy(&self) -> bool {
+        self.healthy
+    }
+}
+
+pub async fn health_thread(config: Config, sender: &Sender<Vec<HealthResult>>) {
+    let mut interval = time::interval(Duration::from_secs(config.healthcheck_interval_secs as u64));
 
     loop {
         let healthy_backends = get_healthy_backends(&config.backends).await;
 
-        sender.send(healthy_backends).await;
+        let _ = sender.send(healthy_backends).await;
 
         interval.tick().await;
     }
 }
 
-async fn get_healthy_backends(backends: &Vec<Backend>) -> Vec<Backend> {
+async fn get_healthy_backends(backends: &Vec<Backend>) -> Vec<HealthResult> {
     let client = Client::new();
 
     let results = join_all(backends.iter().map(|b| client.get(&b.health_url).send())).await;
 
     zip(backends, results.iter().map(is_healthy))
-        .filter_map(|(b, res)| if res { Some(b.clone()) } else { None })
+        .map(|(backend, healthy)| HealthResult {
+            backend: backend.clone(),
+            healthy,
+        })
         .collect()
 }
 
