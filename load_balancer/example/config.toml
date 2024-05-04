@@ -1,0 +1,13 @@
+healthcheck_interval_secs = 30
+
+[[backends]]
+url = "http://127.0.0.1:8081"
+healthcheck_path = "/health"
+
+[[backends]]
+url = "http://127.0.0.1:8082"
+healthcheck_path = "/health"
+
+[[backends]]
+url = "http://127.0.0.1:8083"
+healthcheck_path = "/health"
