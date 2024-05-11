@@ -15,7 +15,7 @@ pub mod config;
 
 pub use config::Backend;
 pub use config::Config;
-pub use error::Error;
+pub use error::LBError;
 
 pub mod error;
 mod health;
@@ -70,7 +70,7 @@ impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
             App::new()
                 .app_data(app_data.clone())
                 .service(healthcheck)
-                .default_service(web::to(handler::<P>))
+                .default_service(web::to(Self::handler))
         })
         .bind(("127.0.0.1", self.port))
         .unwrap()
@@ -82,37 +82,34 @@ impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
     pub fn uri(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
+
+    async fn handler(
+        req: HttpRequest,
+        data: web::Data<AppState<P>>,
+        bytes: web::Bytes,
+    ) -> Result<HttpResponse, LBError> {
+        let server = data.policy.next(&req).await;
+        let uri = format!("{}{}", server, req.uri());
+
+        let request_builder = data
+            .client
+            .request(req.method().clone(), uri)
+            .headers(req.headers().into())
+            .body(bytes);
+
+        let response = request_builder.send().await?;
+
+        let mut response_builder = HttpResponse::build(response.status());
+        for h in response.headers().iter() {
+            response_builder.append_header(h);
+        }
+        let body = response.bytes().await?;
+
+        Ok(response_builder.body(body))
+    }
 }
 
 struct AppState<P: RoutingPolicy> {
     policy: Arc<P>,
     client: Client,
-}
-
-async fn handler<P>(
-    req: HttpRequest,
-    data: web::Data<AppState<P>>,
-    bytes: web::Bytes,
-) -> Result<HttpResponse, Error>
-where
-    P: RoutingPolicy,
-{
-    let server = data.policy.next(&req).await;
-    let uri = format!("{}{}", server, req.uri());
-
-    let request_builder = data
-        .client
-        .request(req.method().clone(), uri)
-        .headers(req.headers().into())
-        .body(bytes);
-
-    let response = request_builder.send().await?;
-
-    let mut response_builder = HttpResponse::build(response.status());
-    for h in response.headers().iter() {
-        response_builder.append_header(h);
-    }
-    let body = response.bytes().await?;
-
-    Ok(response_builder.body(body))
 }

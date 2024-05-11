@@ -1,27 +1,31 @@
-use std::{fmt::Display, io};
-
 use actix_web::{http::header::ContentType, HttpResponse, ResponseError};
+use std::{io, path::PathBuf};
 
-#[derive(Debug)]
-pub enum Error {
-    BackendError(reqwest::Error),
-    IoError(io::Error),
-    InvalidConfig(toml::de::Error),
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum LBError {
+    #[error("backend error")]
+    BackendError(#[from] reqwest::Error),
+
+    #[error("Configuration file not found at \"{:?}\"", .config_file_path.as_path())]
+    MissingConfigurationFile {
+        config_file_path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Invalid configuration file")]
+    InvalidConfig(#[from] toml::de::Error),
+
+    #[error("Generic I/O error")]
+    IoError(#[from] io::Error),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::BackendError(e) => f.write_fmt(format_args!("Backend error: {:?}", e)),
-            Error::IoError(e) => f.write_fmt(format_args!("IO Error: {:?}", e)),
-            Error::InvalidConfig(e) => {
-                f.write_fmt(format_args!("Invalid configuration: {}", e.message()))
-            }
-        }
-    }
-}
-
-impl ResponseError for Error {
+impl ResponseError for LBError {
     fn status_code(&self) -> reqwest::StatusCode {
         reqwest::StatusCode::INTERNAL_SERVER_ERROR
     }
@@ -30,23 +34,5 @@ impl ResponseError for Error {
         HttpResponse::build(self.status_code())
             .insert_header(ContentType::html())
             .body(self.to_string())
-    }
-}
-
-impl From<reqwest::Error> for Error {
-    fn from(value: reqwest::Error) -> Self {
-        Error::BackendError(value)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        Error::IoError(value)
-    }
-}
-
-impl From<toml::de::Error> for Error {
-    fn from(value: toml::de::Error) -> Self {
-        Error::InvalidConfig(value)
     }
 }

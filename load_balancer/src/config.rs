@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use serde_derive::Deserialize;
 
-use crate::Error;
+use crate::LBError;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Backend {
@@ -26,8 +26,11 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn new(path: &PathBuf) -> Result<Self, Error> {
-        let content = fs::read_to_string(path)?;
-        toml::from_str(&content).map_err(Error::InvalidConfig)
+    pub fn new(path: &PathBuf) -> Result<Self, LBError> {
+        let content = fs::read_to_string(path).map_err(|e| LBError::MissingConfigurationFile {
+            config_file_path: path.clone(),
+            source: e,
+        })?;
+        toml::from_str(&content).map_err(LBError::InvalidConfig)
     }
 }

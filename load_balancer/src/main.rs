@@ -1,11 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::{arg, command, Parser};
-use lb::{
-    config::{Config},
-    policies::RoundRobinPolicy,
-    Error, LoadBalancer,
-};
+use lb::{config::Config, policies::RoundRobinPolicy, LBError, LoadBalancer};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -18,7 +14,7 @@ struct Cli {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), LBError> {
     let args = Cli::parse();
 
     let port = args.port.unwrap_or(8080u16);
