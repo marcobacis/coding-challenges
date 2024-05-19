@@ -7,7 +7,7 @@ use actix_web::{
 use health::HealthResult;
 use tokio::sync::mpsc::channel;
 
-use policies::RoutingPolicy;
+use policies::{RoutingPolicy, SafeRoutingPolicy};
 use reqwest::Client;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -21,22 +21,14 @@ pub mod error;
 mod health;
 pub mod policies;
 
-pub struct LoadBalancer<P>
-where
-    P: RoutingPolicy + 'static,
-{
+pub struct LoadBalancer {
     port: u16,
-    data: Arc<AppState<P>>,
+    data: Arc<AppState>,
     config: Config,
 }
 
-#[actix_web::get("/health")]
-async fn healthcheck() -> &'static str {
-    "Ok"
-}
-
-impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
-    pub fn new(port: u16, config: Config, policy: Arc<P>) -> Self {
+impl LoadBalancer {
+    pub fn new(port: u16, config: Config, policy: Arc<SafeRoutingPolicy>) -> Self {
         Self {
             port,
             data: Arc::new(AppState {
@@ -69,7 +61,7 @@ impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
         HttpServer::new(move || {
             App::new()
                 .app_data(app_data.clone())
-                .service(healthcheck)
+                .route("/health", web::get().to(HttpResponse::Ok))
                 .default_service(web::to(Self::handler))
         })
         .bind(("127.0.0.1", self.port))
@@ -85,7 +77,7 @@ impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
 
     async fn handler(
         req: HttpRequest,
-        data: web::Data<AppState<P>>,
+        data: web::Data<AppState>,
         bytes: web::Bytes,
     ) -> Result<HttpResponse, LBError> {
         let server = data.policy.next(&req).await;
@@ -109,7 +101,7 @@ impl<P: RoutingPolicy + Send + Sync> LoadBalancer<P> {
     }
 }
 
-struct AppState<P: RoutingPolicy> {
-    policy: Arc<P>,
+struct AppState {
+    policy: Arc<SafeRoutingPolicy>,
     client: Client,
 }

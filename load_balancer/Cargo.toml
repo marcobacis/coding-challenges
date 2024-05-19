@@ -15,6 +15,7 @@ path = "src/backend.rs"
 [dependencies]
 actix-web = "4.5.1"
 anyhow = "1.0.83"
+async-trait = "0.1.80"
 clap = { version = "4.5.2", features = ["derive", "env"] }
 futures = "0.3.30"
 join = "0.3.1"

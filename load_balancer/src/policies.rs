@@ -2,17 +2,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use actix_web::HttpRequest;
 
+use async_trait::async_trait;
 use tokio::sync::RwLock;
 
 use crate::{health::HealthResult, Backend, Config};
 
-pub trait RoutingPolicy {
-    fn next(&self, request: &HttpRequest) -> impl std::future::Future<Output = String>;
+pub type SafeRoutingPolicy = dyn RoutingPolicy + Sync + Send;
 
-    fn health_results(
-        &self,
-        results: Vec<HealthResult>,
-    ) -> impl std::future::Future<Output = ()> + std::marker::Send;
+#[async_trait]
+pub trait RoutingPolicy {
+    async fn next(&self, request: &HttpRequest) -> String;
+
+    async fn health_results(&self, results: Vec<HealthResult>);
 }
 
 pub struct RoundRobinPolicy {
@@ -35,6 +36,7 @@ impl RoundRobinPolicy {
     }
 }
 
+#[async_trait]
 impl RoutingPolicy for RoundRobinPolicy {
     async fn next(&self, _request: &HttpRequest) -> String {
         let servers = self.backends.read().await.clone();
