@@ -40,18 +40,8 @@ impl RoundRobinPolicy {
 impl RoutingPolicy for RoundRobinPolicy {
     async fn next(&self, _request: &HttpRequest) -> String {
         let servers = self.backends.read().await.clone();
-        let max_server_idx = servers.len() - 1;
-
-        // Update index
-        let idx = self
-            .idx
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |idx| match idx {
-                x if x >= max_server_idx => Some(0),
-                c => Some(c + 1),
-            })
-            .unwrap_or_default();
-
-        servers.get(idx).unwrap().url.clone()
+        let idx = self.idx.fetch_add(1, Ordering::Relaxed);
+        servers.get(idx % servers.len()).unwrap().url.clone()
     }
 
     async fn health_results(&self, results: Vec<HealthResult>) {
